@@ -52,7 +52,7 @@ public class AuthService {
         user.setUsername(clean);
         user.setPasswordHash(encoder.encode(password));
         user.setDisplayName(displayName != null && !displayName.isBlank() ? displayName : clean);
-        userRepo.save(user);
+        user = userRepo.save(user);
 
         Balance balance = new Balance(user.getId(), new BigDecimal("5000.00"));
         balanceRepo.save(balance);
