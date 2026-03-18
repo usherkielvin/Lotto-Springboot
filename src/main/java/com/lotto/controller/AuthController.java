@@ -2,6 +2,7 @@ package com.lotto.controller;
 
 import com.lotto.service.AuthService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -45,5 +46,11 @@ public class AuthController {
         } catch (RuntimeException e) {
             return ResponseEntity.status(400).body(Map.of("error", e.getMessage()));
         }
+    }
+
+    @GetMapping("/hash")
+    public ResponseEntity<?> generateHash(@RequestParam String password) {
+        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+        return ResponseEntity.ok(Map.of("hash", encoder.encode(password)));
     }
 }

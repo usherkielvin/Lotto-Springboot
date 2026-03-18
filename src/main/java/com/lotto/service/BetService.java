@@ -3,9 +3,11 @@ package com.lotto.service;
 import com.lotto.entity.Balance;
 import com.lotto.entity.Bet;
 import com.lotto.entity.LottoGame;
+import com.lotto.entity.OfficialResult;
 import com.lotto.repository.BalanceRepository;
 import com.lotto.repository.BetRepository;
 import com.lotto.repository.LottoGameRepository;
+import com.lotto.repository.OfficialResultRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.lang.NonNull;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,11 +25,13 @@ public class BetService {
     private final BetRepository betRepo;
     private final BalanceRepository balanceRepo;
     private final LottoGameRepository gameRepo;
+    private final OfficialResultRepository resultRepo;
 
-    public BetService(BetRepository betRepo, BalanceRepository balanceRepo, LottoGameRepository gameRepo) {
+    public BetService(BetRepository betRepo, BalanceRepository balanceRepo, LottoGameRepository gameRepo, OfficialResultRepository resultRepo) {
         this.betRepo = betRepo;
         this.balanceRepo = balanceRepo;
         this.gameRepo = gameRepo;
+        this.resultRepo = resultRepo;
     }
 
     // ── Place Bet ──────────────────────────────────────────────────────────────
@@ -100,7 +104,7 @@ public class BetService {
             LottoGame game = gameRepo.findById(bet.getGameId()).orElse(null);
             if (game == null) continue;
 
-            List<Integer> official = buildOfficialNumbers(game, bet.getDrawDateKey());
+            List<Integer> official = getOfficialNumbers(game, bet.getDrawDateKey());
             List<Integer> picked = stringToNumbers(bet.getNumbers());
             int matches = countMatches(picked, official);
             BigDecimal payout = computePayout(matches, bet.getStake());
@@ -122,6 +126,14 @@ public class BetService {
                 balanceRepo.save(balance);
             }
         }
+    }
+
+    // ── Get official numbers (from DB or seeded fallback) ────────────────────
+
+    private List<Integer> getOfficialNumbers(LottoGame game, String drawDateKey) {
+        return resultRepo.findByGameIdAndDrawDateKey(game.getId(), drawDateKey)
+                .map(result -> stringToNumbers(result.getNumbers()))
+                .orElseGet(() -> buildOfficialNumbers(game, drawDateKey));
     }
 
     // ── Seeded RNG (same logic as frontend) ───────────────────────────────────

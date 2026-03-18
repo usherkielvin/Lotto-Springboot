@@ -65,6 +65,7 @@ public class AuthService {
         result.put("userId", user.getId());
         result.put("username", user.getUsername());
         result.put("displayName", user.getDisplayName() != null ? user.getDisplayName() : user.getUsername());
+        result.put("role", user.getRole());
         result.put("demo", isDemo);
         return result;
     }

@@ -20,6 +20,9 @@ public class User {
     @Column(name = "display_name")
     private String displayName;
 
+    @Column(nullable = false)
+    private String role = "user"; // "user" or "admin"
+
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -33,6 +36,8 @@ public class User {
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

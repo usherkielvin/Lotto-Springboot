@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(100) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(100),
+    role VARCHAR(20) NOT NULL DEFAULT 'user',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -35,11 +36,29 @@ CREATE TABLE IF NOT EXISTS bets (
     CONSTRAINT fk_bet_user FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- Seed demo user (password: pcso2026 BCrypt hashed)
-INSERT IGNORE INTO users (id, username, password_hash, display_name) VALUES
-    (1, 'demo-player', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Demo Account');
+CREATE TABLE IF NOT EXISTS official_results (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    game_id VARCHAR(50) NOT NULL,
+    draw_date_key VARCHAR(20) NOT NULL,
+    numbers VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_game_draw (game_id, draw_date_key)
+);
 
-INSERT IGNORE INTO balances (user_id, amount) VALUES (1, 5000.00);
+-- Seed demo user (password: pcso2026 BCrypt hashed)
+INSERT IGNORE INTO users (username, password_hash, display_name, role) VALUES
+    ('demo-player', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Demo Account', 'user');
+
+-- Seed admin user (username: admin, password: admin123)
+INSERT IGNORE INTO users (username, password_hash, display_name, role) VALUES
+    ('admin', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Administrator', 'admin');
+
+-- Seed balances for demo and admin users
+INSERT IGNORE INTO balances (user_id, amount) 
+SELECT id, 5000.00 FROM users WHERE username = 'demo-player' AND NOT EXISTS (SELECT 1 FROM balances WHERE user_id = (SELECT id FROM users WHERE username = 'demo-player'));
+
+INSERT IGNORE INTO balances (user_id, amount) 
+SELECT id, 999999.00 FROM users WHERE username = 'admin' AND NOT EXISTS (SELECT 1 FROM balances WHERE user_id = (SELECT id FROM users WHERE username = 'admin'));
 
 -- Seed PCSO games
 INSERT IGNORE INTO lotto_games (id, name, max_number, draw_time) VALUES
