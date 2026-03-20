@@ -66,6 +66,30 @@ public class BetController {
         }
     }
 
+    /** Unclaimed winning tickets */
+    @GetMapping("/unclaimed")
+    public ResponseEntity<?> getUnclaimed(@RequestHeader("X-User-Id") @NonNull Long userId) {
+        try {
+            return ResponseEntity.ok(betService.getUnclaimedWins(userId));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Mark a winning bet as claimed */
+    @PostMapping("/claim")
+    public ResponseEntity<?> claimBet(@RequestHeader("X-User-Id") @NonNull Long userId,
+                                       @RequestBody Map<String, Object> body) {
+        try {
+            String betId = (String) body.get("betId");
+            if (betId == null) throw new RuntimeException("betId is required.");
+            betService.claimBet(userId, betId);
+            return ResponseEntity.ok(Map.of("message", "Claimed."));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Current balance */
     @GetMapping("/balance")
     public ResponseEntity<?> getBalance(@RequestHeader("X-User-Id") @NonNull Long userId) {

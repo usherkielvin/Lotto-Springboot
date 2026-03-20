@@ -18,4 +18,14 @@ public interface BetRepository extends JpaRepository<Bet, String> {
     List<Bet> findPendingByGameDateTimeIgnoreCase(@Param("gameId") String gameId,
                                                   @Param("drawDateKey") String drawDateKey,
                                                   @Param("drawTime") String drawTime);
+
+    /** Settled bets (won/lost) for a specific draw — used to re-settle if official result changes */
+    @Query("SELECT b FROM Bet b WHERE b.gameId = :gameId AND b.drawDateKey = :drawDateKey AND UPPER(b.drawTime) = UPPER(:drawTime) AND b.status IN :statuses")
+    List<Bet> findByGameIdAndDrawDateKeyAndDrawTimeAndStatusIn(@Param("gameId") String gameId,
+                                                               @Param("drawDateKey") String drawDateKey,
+                                                               @Param("drawTime") String drawTime,
+                                                               @Param("statuses") List<String> statuses);
+
+    /** Won bets not yet claimed by the user */
+    List<Bet> findByUserIdAndStatusAndClaimedFalseOrderByPlacedAtDesc(Long userId, String status);
 }

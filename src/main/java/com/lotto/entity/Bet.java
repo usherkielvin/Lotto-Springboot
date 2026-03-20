@@ -45,6 +45,9 @@ public class Bet {
     @Column(name = "official_numbers")
     private String officialNumbers;
 
+    @Column(nullable = false)
+    private boolean claimed = false;
+
     public Bet() {}
 
     // Getters & Setters
@@ -74,4 +77,6 @@ public class Bet {
     public void setPayout(BigDecimal payout) { this.payout = payout; }
     public String getOfficialNumbers() { return officialNumbers; }
     public void setOfficialNumbers(String officialNumbers) { this.officialNumbers = officialNumbers; }
+    public boolean isClaimed() { return claimed; }
+    public void setClaimed(boolean claimed) { this.claimed = claimed; }
 }

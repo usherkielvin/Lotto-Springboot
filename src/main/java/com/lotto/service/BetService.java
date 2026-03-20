@@ -3,6 +3,7 @@ package com.lotto.service;
 import com.lotto.entity.Balance;
 import com.lotto.entity.Bet;
 import com.lotto.entity.LottoGame;
+import com.lotto.entity.OfficialResult;
 import com.lotto.repository.BalanceRepository;
 import com.lotto.repository.BetRepository;
 import com.lotto.repository.LottoGameRepository;
@@ -95,6 +96,26 @@ public class BetService {
         return enrichBets(bets);
     }
 
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getUnclaimedWins(@NonNull Long userId) {
+        List<Bet> bets = betRepo.findByUserIdAndStatusAndClaimedFalseOrderByPlacedAtDesc(userId, "won");
+        return enrichBets(bets);
+    }
+
+    @Transactional
+    public void claimBet(@NonNull Long userId, String betId) {
+        Bet bet = betRepo.findById(betId)
+            .orElseThrow(() -> new RuntimeException("Bet not found."));
+        if (!bet.getUserId().equals(userId))
+            throw new RuntimeException("Not your bet.");
+        if (!"won".equals(bet.getStatus()))
+            throw new RuntimeException("Bet is not a winning bet.");
+        if (bet.isClaimed())
+            throw new RuntimeException("Already claimed.");
+        bet.setClaimed(true);
+        betRepo.save(bet);
+    }
+
     // ── Settle all pending bets for a specific result (called on import) ────────
 
     @Transactional
@@ -102,27 +123,52 @@ public class BetService {
         // Normalize the draw time the same way bets store it
         String normalizedTime = formatDrawTime(parseSingleDrawTime(drawTime));
 
-        // Use case-insensitive query to catch any format mismatches
-        List<Bet> pending = betRepo.findPendingByGameDateTimeIgnoreCase(gameId, drawDateKey, normalizedTime);
+        // Find all pending bets — case-insensitive draw time match
+        List<Bet> pending = new ArrayList<>(betRepo.findPendingByGameDateTimeIgnoreCase(gameId, drawDateKey, normalizedTime));
 
         // Also try with the raw imported time string if different
         if (!drawTime.equalsIgnoreCase(normalizedTime)) {
             List<Bet> extra = betRepo.findPendingByGameDateTimeIgnoreCase(gameId, drawDateKey, drawTime);
             for (Bet b : extra) {
                 if (pending.stream().noneMatch(x -> x.getId().equals(b.getId()))) {
-                    pending = new ArrayList<>(pending);
                     pending.add(b);
                 }
             }
         }
 
-        if (pending.isEmpty()) return;
+        // Also re-settle any bets that were previously settled with seeded RNG (wrong numbers)
+        // — identified by having officialNumbers that don't match the real result
+        List<Bet> wronglySettled = betRepo.findByGameIdAndDrawDateKeyAndDrawTimeAndStatusIn(
+            gameId, drawDateKey, normalizedTime, List.of("won", "lost"));
+        for (Bet b : wronglySettled) {
+            if (b.getOfficialNumbers() != null && !b.getOfficialNumbers().equals(officialNumbersCsv)) {
+                if (pending.stream().noneMatch(x -> x.getId().equals(b.getId()))) {
+                    pending.add(b);
+                }
+            }
+        }
+
+        if (pending.isEmpty()) {
+            log.info("No bets to settle for {} {} {}", gameId, drawDateKey, normalizedTime);
+            return;
+        }
 
         List<Integer> official = stringToNumbers(officialNumbersCsv);
         BigDecimal totalPayout = BigDecimal.ZERO;
         Map<Long, BigDecimal> payoutByUser = new LinkedHashMap<>();
+        Map<Long, BigDecimal> refundByUser = new LinkedHashMap<>(); // refund previously credited wrong payouts
 
         for (Bet bet : pending) {
+            // If bet was previously settled with wrong numbers, reverse the old payout
+            if (("won".equals(bet.getStatus()) || "lost".equals(bet.getStatus()))
+                    && bet.getOfficialNumbers() != null
+                    && !bet.getOfficialNumbers().equals(officialNumbersCsv)) {
+                BigDecimal oldPayout = bet.getPayout() != null ? bet.getPayout() : BigDecimal.ZERO;
+                if (oldPayout.compareTo(BigDecimal.ZERO) > 0) {
+                    refundByUser.merge(bet.getUserId(), oldPayout, BigDecimal::add);
+                }
+            }
+
             List<Integer> picked = stringToNumbers(bet.getNumbers());
             int matches = countMatches(picked, official);
             BigDecimal payout = computePayoutForGame(gameId, matches, bet.getStake());
@@ -132,6 +178,7 @@ public class BetService {
             bet.setMatches(matches);
             bet.setPayout(payout);
             bet.setOfficialNumbers(officialNumbersCsv);
+            bet.setClaimed(false);
             betRepo.save(bet);
 
             if (payout.compareTo(BigDecimal.ZERO) > 0) {
@@ -140,11 +187,19 @@ public class BetService {
             }
         }
 
-        // Credit winnings to each user's balance
-        for (Map.Entry<Long, BigDecimal> entry : payoutByUser.entrySet()) {
-            Balance balance = balanceRepo.findById(entry.getKey()).orElse(null);
-            if (balance != null) {
-                balance.setAmount(balance.getAmount().add(entry.getValue()));
+        // Apply balance changes: deduct wrong old payouts, credit correct new payouts
+        Set<Long> allUsers = new LinkedHashSet<>();
+        allUsers.addAll(payoutByUser.keySet());
+        allUsers.addAll(refundByUser.keySet());
+
+        for (Long uid : allUsers) {
+            Balance balance = balanceRepo.findById(uid).orElse(null);
+            if (balance == null) continue;
+            BigDecimal credit = payoutByUser.getOrDefault(uid, BigDecimal.ZERO);
+            BigDecimal deduct = refundByUser.getOrDefault(uid, BigDecimal.ZERO);
+            BigDecimal net = credit.subtract(deduct);
+            if (net.compareTo(BigDecimal.ZERO) != 0) {
+                balance.setAmount(balance.getAmount().add(net));
                 balanceRepo.save(balance);
             }
         }
@@ -169,7 +224,15 @@ public class BetService {
             LocalDateTime drawAt = LocalDateTime.of(drawDate, drawClock);
             if (now.isBefore(drawAt)) continue;
 
-            List<Integer> official = getOfficialNumbers(game, bet.getDrawDateKey(), resolvedDrawTime);
+            // Only settle if an official result exists in the DB — never use seeded RNG fallback
+            // to avoid settling with wrong numbers before admin imports the real result.
+            Optional<OfficialResult> officialResult = findOfficialResult(game.getId(), bet.getDrawDateKey(), resolvedDrawTime);
+            if (officialResult.isEmpty()) {
+                log.debug("No official result yet for {} {} {} — skipping lazy settle", game.getId(), bet.getDrawDateKey(), resolvedDrawTime);
+                continue;
+            }
+
+            List<Integer> official = stringToNumbers(officialResult.get().getNumbers());
             List<Integer> picked = stringToNumbers(bet.getNumbers());
             int matches = countMatches(picked, official);
             BigDecimal payout = computePayoutForGame(bet.getGameId(), matches, bet.getStake());
@@ -178,10 +241,12 @@ public class BetService {
             bet.setStatus(payout.compareTo(BigDecimal.ZERO) > 0 ? "won" : "lost");
             bet.setMatches(matches);
             bet.setPayout(payout);
-            bet.setOfficialNumbers(numbersToString(official));
+            bet.setOfficialNumbers(officialResult.get().getNumbers());
             betRepo.save(bet);
 
-            totalPayout = totalPayout.add(payout);
+            if (payout.compareTo(BigDecimal.ZERO) > 0) {
+                totalPayout = totalPayout.add(payout);
+            }
             anySettled = true;
         }
 
@@ -192,6 +257,32 @@ public class BetService {
                 balanceRepo.save(balance);
             }
         }
+    }
+
+    /**
+     * Looks up an official result tolerating minor draw-time format differences
+     * (e.g. "9:00 PM" vs "9:00 pm"). Falls back to a case-insensitive JPQL query.
+     */
+    private Optional<OfficialResult> findOfficialResult(String gameId, String drawDateKey, String drawTime) {
+        // Exact match first
+        Optional<OfficialResult> exact = resultRepo.findByGameIdAndDrawDateKeyAndDrawTime(gameId, drawDateKey, drawTime);
+        if (exact.isPresent()) return exact;
+
+        // Try normalized uppercase
+        String upper = drawTime.toUpperCase(Locale.ENGLISH);
+        if (!upper.equals(drawTime)) {
+            Optional<OfficialResult> up = resultRepo.findByGameIdAndDrawDateKeyAndDrawTime(gameId, drawDateKey, upper);
+            if (up.isPresent()) return up;
+        }
+
+        // Try lowercase
+        String lower = drawTime.toLowerCase(Locale.ENGLISH);
+        if (!lower.equals(drawTime)) {
+            Optional<OfficialResult> lo = resultRepo.findByGameIdAndDrawDateKeyAndDrawTime(gameId, drawDateKey, lower);
+            if (lo.isPresent()) return lo;
+        }
+
+        return Optional.empty();
     }
 
     // ── Get required number count for a game ─────────────────────────────────
@@ -206,60 +297,7 @@ public class BetService {
         return 6; // all standard 6-number lotto games
     }
 
-    // ── Get official numbers (from DB or seeded fallback) ────────────────────
 
-    private List<Integer> getOfficialNumbers(LottoGame game, String drawDateKey, String drawTime) {
-        return resultRepo.findByGameIdAndDrawDateKeyAndDrawTime(game.getId(), drawDateKey, drawTime)
-                .map(result -> stringToNumbers(result.getNumbers()))
-                .orElseGet(() -> buildOfficialNumbers(game, drawDateKey));
-    }
-
-    // ── Seeded RNG (same logic as frontend) ───────────────────────────────────
-
-    private List<Integer> buildOfficialNumbers(LottoGame game, String drawDateKey) {
-        String seed = "pcso:" + game.getId() + ":" + drawDateKey;
-        long hash = 2166136261L;
-        for (char c : seed.toCharArray()) {
-            hash ^= c;
-            hash = (hash * 16777619L) & 0xFFFFFFFFL;
-        }
-
-        int required = getRequiredCount(game);
-        String id = game.getId().toLowerCase();
-        String name = game.getName().toLowerCase();
-        boolean isDigitGame = id.contains("3d") || name.contains("swertres") || name.contains("3d")
-                || id.contains("4d") || name.contains("4-digit")
-                || id.contains("6digit") || id.contains("6-digit")
-                || id.contains("2d") || name.contains("ez2");
-
-        List<Integer> result = new ArrayList<>();
-        if (isDigitGame) {
-            // Digit games: random digits 0–9, repeats allowed
-            for (int i = 0; i < required; i++) {
-                hash = (hash + (hash << 13)) & 0xFFFFFFFFL;
-                hash ^= (hash >> 7);
-                hash = (hash + (hash << 3)) & 0xFFFFFFFFL;
-                hash ^= (hash >> 17);
-                hash = (hash + (hash << 5)) & 0xFFFFFFFFL;
-                result.add((int)(hash % 10));
-            }
-        } else {
-            // 6-number games: unique numbers 1–maxNumber
-            Set<Integer> picked = new LinkedHashSet<>();
-            while (picked.size() < required) {
-                hash = (hash + (hash << 13)) & 0xFFFFFFFFL;
-                hash ^= (hash >> 7);
-                hash = (hash + (hash << 3)) & 0xFFFFFFFFL;
-                hash ^= (hash >> 17);
-                hash = (hash + (hash << 5)) & 0xFFFFFFFFL;
-                int num = (int)(hash % game.getMaxNumber()) + 1;
-                picked.add(num);
-            }
-            result = new ArrayList<>(picked);
-            Collections.sort(result);
-        }
-        return result;
-    }
 
     private int countMatches(List<Integer> picked, List<Integer> official) {
         // For digit games (3D/4D/6D/2D), official list may have same size as picked
@@ -444,6 +482,8 @@ public class BetService {
         m.put("matches", bet.getMatches());
         m.put("payout", bet.getPayout());
         m.put("officialNumbers", bet.getOfficialNumbers() != null ? stringToNumbers(bet.getOfficialNumbers()) : null);
+        m.put("jackpot", game != null ? game.getJackpot() : null);
+        m.put("claimed", bet.isClaimed());
         return m;
     }
 

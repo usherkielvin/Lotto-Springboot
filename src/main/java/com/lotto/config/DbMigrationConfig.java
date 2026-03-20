@@ -13,6 +13,34 @@ public class DbMigrationConfig {
     private static final Logger log = LoggerFactory.getLogger(DbMigrationConfig.class);
 
     /**
+     * Ensures the `claimed` column exists on the bets table.
+     * Added when the claim-winnings feature was introduced.
+     */
+    @Bean
+    public ApplicationRunner addClaimedColumnToBets(JdbcTemplate jdbc) {
+        return args -> {
+            try {
+                Integer exists = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS " +
+                    "WHERE TABLE_SCHEMA = DATABASE() " +
+                    "  AND TABLE_NAME = 'bets' " +
+                    "  AND COLUMN_NAME = 'claimed'",
+                    Integer.class
+                );
+                if (exists == null || exists == 0) {
+                    log.warn("bets.claimed column missing — adding...");
+                    jdbc.execute("ALTER TABLE bets ADD COLUMN claimed BOOLEAN NOT NULL DEFAULT FALSE");
+                    log.info("bets.claimed column added");
+                } else {
+                    log.info("bets.claimed column already exists — no migration needed");
+                }
+            } catch (Exception e) {
+                log.error("Failed to add claimed column to bets", e);
+            }
+        };
+    }
+
+    /**
      * Ensures the unique key on official_results includes draw_time.
      * The old key was (game_id, draw_date_key) — without draw_time —
      * which caused duplicate errors when saving 2PM/5PM/9PM for the same game+date.
