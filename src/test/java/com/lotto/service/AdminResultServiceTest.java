@@ -22,6 +22,7 @@ import static org.mockito.Mockito.*;
  *   2. AdminController upserts OfficialResult via OfficialResultRepository.
  *   3. BetService.settleByResult is called to settle all bets for that slot.
  */
+@SuppressWarnings("null")
 class AdminResultServiceTest {
 
     private OfficialResultRepository resultRepo;

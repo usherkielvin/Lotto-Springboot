@@ -104,7 +104,7 @@ public class BetService {
 
     @Transactional
     public void claimBet(@NonNull Long userId, String betId) {
-        Bet bet = betRepo.findById(betId)
+        Bet bet = betRepo.findById(Objects.requireNonNull(betId))
             .orElseThrow(() -> new RuntimeException("Bet not found."));
         if (!bet.getUserId().equals(userId))
             throw new RuntimeException("Not your bet.");
@@ -151,11 +151,14 @@ public class BetService {
         Map<Long, BigDecimal> deductByUser  = new LinkedHashMap<>(); // old wrong payouts to reverse
 
         for (Bet bet : betMap.values()) {
+            Long bUserId = bet.getUserId();
+            if (bUserId == null) continue;
+
             // Reverse any previously credited payout so we don't double-credit
             BigDecimal oldPayout = bet.getPayout() != null ? bet.getPayout() : BigDecimal.ZERO;
             if (oldPayout.compareTo(BigDecimal.ZERO) > 0
                     && ("won".equals(bet.getStatus()) || "lost".equals(bet.getStatus()))) {
-                deductByUser.merge(bet.getUserId(), oldPayout, BigDecimal::add);
+                deductByUser.merge(bUserId, oldPayout, BigDecimal::add);
             }
 
             List<Integer> picked = stringToNumbers(bet.getNumbers());
@@ -172,7 +175,7 @@ public class BetService {
             betRepo.save(bet);
 
             if (payout.compareTo(BigDecimal.ZERO) > 0) {
-                creditByUser.merge(bet.getUserId(), payout, BigDecimal::add);
+                creditByUser.merge(bUserId, payout, BigDecimal::add);
             }
         }
 
@@ -183,7 +186,11 @@ public class BetService {
 
         BigDecimal totalNet = BigDecimal.ZERO;
         for (Long uid : allUsers) {
+            if (uid == null) continue;
             Balance balance = balanceRepo.findById(uid).orElse(null);
+
+
+
             if (balance == null) continue;
             BigDecimal credit = creditByUser.getOrDefault(uid, BigDecimal.ZERO);
             BigDecimal deduct = deductByUser.getOrDefault(uid, BigDecimal.ZERO);
