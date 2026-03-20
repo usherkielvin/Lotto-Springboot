@@ -1,14 +1,14 @@
 package com.lotto.controller;
 
 import com.lotto.entity.LottoGame;
+import com.lotto.repository.BetRepository;
 import com.lotto.repository.LottoGameRepository;
+import com.lotto.repository.OfficialResultRepository;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
@@ -16,9 +16,13 @@ import java.util.stream.Collectors;
 public class GameController {
 
     private final LottoGameRepository gameRepo;
+    private final OfficialResultRepository resultRepo;
+    private final BetRepository betRepo;
 
-    public GameController(LottoGameRepository gameRepo) {
+    public GameController(LottoGameRepository gameRepo, OfficialResultRepository resultRepo, BetRepository betRepo) {
         this.gameRepo = gameRepo;
+        this.resultRepo = resultRepo;
+        this.betRepo = betRepo;
     }
 
     @GetMapping
@@ -42,5 +46,42 @@ public class GameController {
                     .collect(Collectors.toSet());
             return days.contains(d);
         }).collect(Collectors.toList());
+    }
+
+    /** Returns each game with all draw results (newest first) and winner counts. */
+    @GetMapping("/results")
+    public List<Map<String, Object>> gameResults() {
+        List<LottoGame> games = gameRepo.findAll();
+        List<Map<String, Object>> out = new ArrayList<>();
+
+        for (LottoGame game : games) {
+            List<com.lotto.entity.OfficialResult> results =
+                resultRepo.findByGameIdOrderByDrawDateKeyDesc(game.getId());
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id",           game.getId());
+            row.put("name",         game.getName());
+            row.put("jackpot",      game.getJackpot());
+            row.put("jackpotStatus",game.getJackpotStatus());
+            row.put("drawTime",     game.getDrawTime());
+            row.put("drawDays",     game.getDrawDays());
+            row.put("maxNumber",    game.getMaxNumber());
+
+            List<Map<String, Object>> drawResults = new ArrayList<>();
+            for (com.lotto.entity.OfficialResult r : results) {
+                long winners = betRepo.countByGameIdAndDrawDateKeyAndDrawTimeAndStatus(
+                    game.getId(), r.getDrawDateKey(), r.getDrawTime(), "won");
+                Map<String, Object> dr = new LinkedHashMap<>();
+                dr.put("drawDateKey", r.getDrawDateKey());
+                dr.put("drawTime",    r.getDrawTime());
+                dr.put("numbers",     r.getNumbers());
+                dr.put("winners",     winners);
+                drawResults.add(dr);
+            }
+            row.put("results", drawResults);
+
+            out.add(row);
+        }
+        return out;
     }
 }

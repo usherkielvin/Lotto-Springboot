@@ -3,6 +3,7 @@ package com.lotto.controller;
 import com.lotto.entity.OfficialResult;
 import com.lotto.repository.OfficialResultRepository;
 import com.lotto.repository.UserRepository;
+import com.lotto.service.BetService;
 import com.lotto.service.PcsoScraperService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.lang.NonNull;
@@ -16,11 +17,13 @@ public class AdminController {
     private final OfficialResultRepository resultRepo;
     private final UserRepository userRepo;
     private final PcsoScraperService scraperService;
+    private final BetService betService;
 
-    public AdminController(OfficialResultRepository resultRepo, UserRepository userRepo, PcsoScraperService scraperService) {
+    public AdminController(OfficialResultRepository resultRepo, UserRepository userRepo, PcsoScraperService scraperService, BetService betService) {
         this.resultRepo = resultRepo;
         this.userRepo = userRepo;
         this.scraperService = scraperService;
+        this.betService = betService;
     }
 
     private boolean isAdmin(@NonNull Long userId) {
@@ -66,6 +69,9 @@ public class AdminController {
             result.setDrawTime(drawTime);
             result.setNumbers(numbers);
             resultRepo.save(result);
+
+            // Settle any pending bets that match this result
+            betService.settleByResult(gameId, drawDateKey, drawTime, numbers);
 
             return ResponseEntity.ok(Map.of("message", "Official result saved.", "id", result.getId()));
         } catch (Exception e) {

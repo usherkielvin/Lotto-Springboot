@@ -42,9 +42,11 @@ public class PcsoScraperService {
         DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ENGLISH);
 
     private final OfficialResultRepository resultRepo;
+    private final BetService betService;
 
-    public PcsoScraperService(OfficialResultRepository resultRepo, LottoGameRepository gameRepo) {
+    public PcsoScraperService(OfficialResultRepository resultRepo, LottoGameRepository gameRepo, BetService betService) {
         this.resultRepo = resultRepo;
+        this.betService = betService;
     }
 
     @Transactional
@@ -168,6 +170,10 @@ public class PcsoScraperService {
             r.setNumbers(numbers);
             resultRepo.save(r);
             log.info("Saved: {} {} {} → {}", gameId, drawDateKey, drawTime, numbers);
+
+            // Settle any pending bets that match this result
+            betService.settleByResult(gameId, drawDateKey, drawTime, numbers);
+
             return 1;
         } catch (Exception e) {
             log.error("Failed to save result: {} {} {} {}", gameId, drawDateKey, drawTime, numbers, e);

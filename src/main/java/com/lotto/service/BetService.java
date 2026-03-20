@@ -7,6 +7,8 @@ import com.lotto.repository.BalanceRepository;
 import com.lotto.repository.BetRepository;
 import com.lotto.repository.LottoGameRepository;
 import com.lotto.repository.OfficialResultRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.lang.NonNull;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +23,7 @@ import java.util.*;
 @Service
 public class BetService {
 
+    private static final Logger log = LoggerFactory.getLogger(BetService.class);
     private static final DateTimeFormatter DRAW_TIME_FORMATTER = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH);
     private static final DateTimeFormatter PLACED_AT_FORMATTER = DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a", Locale.ENGLISH);
     private static final LocalTime DEFAULT_DRAW_TIME = LocalTime.of(21, 0);
@@ -36,8 +39,6 @@ public class BetService {
         this.gameRepo = gameRepo;
         this.resultRepo = resultRepo;
     }
-
-    // ── Place Bet ──────────────────────────────────────────────────────────────
 
     @Transactional
     public Map<String, Object> placeBet(@NonNull Long userId, @NonNull String gameId, List<Integer> numbers, BigDecimal stake) {
@@ -94,7 +95,63 @@ public class BetService {
         return enrichBets(bets);
     }
 
-    // ── Settle pending bets past scheduled draw time ───────────────────────────
+    // ── Settle all pending bets for a specific result (called on import) ────────
+
+    @Transactional
+    public void settleByResult(String gameId, String drawDateKey, String drawTime, String officialNumbersCsv) {
+        // Normalize the draw time the same way bets store it
+        String normalizedTime = formatDrawTime(parseSingleDrawTime(drawTime));
+
+        // Use case-insensitive query to catch any format mismatches
+        List<Bet> pending = betRepo.findPendingByGameDateTimeIgnoreCase(gameId, drawDateKey, normalizedTime);
+
+        // Also try with the raw imported time string if different
+        if (!drawTime.equalsIgnoreCase(normalizedTime)) {
+            List<Bet> extra = betRepo.findPendingByGameDateTimeIgnoreCase(gameId, drawDateKey, drawTime);
+            for (Bet b : extra) {
+                if (pending.stream().noneMatch(x -> x.getId().equals(b.getId()))) {
+                    pending = new ArrayList<>(pending);
+                    pending.add(b);
+                }
+            }
+        }
+
+        if (pending.isEmpty()) return;
+
+        List<Integer> official = stringToNumbers(officialNumbersCsv);
+        BigDecimal totalPayout = BigDecimal.ZERO;
+        Map<Long, BigDecimal> payoutByUser = new LinkedHashMap<>();
+
+        for (Bet bet : pending) {
+            List<Integer> picked = stringToNumbers(bet.getNumbers());
+            int matches = countMatches(picked, official);
+            BigDecimal payout = computePayoutForGame(gameId, matches, bet.getStake());
+
+            bet.setDrawTime(normalizedTime);
+            bet.setStatus(payout.compareTo(BigDecimal.ZERO) > 0 ? "won" : "lost");
+            bet.setMatches(matches);
+            bet.setPayout(payout);
+            bet.setOfficialNumbers(officialNumbersCsv);
+            betRepo.save(bet);
+
+            if (payout.compareTo(BigDecimal.ZERO) > 0) {
+                payoutByUser.merge(bet.getUserId(), payout, BigDecimal::add);
+                totalPayout = totalPayout.add(payout);
+            }
+        }
+
+        // Credit winnings to each user's balance
+        for (Map.Entry<Long, BigDecimal> entry : payoutByUser.entrySet()) {
+            Balance balance = balanceRepo.findById(entry.getKey()).orElse(null);
+            if (balance != null) {
+                balance.setAmount(balance.getAmount().add(entry.getValue()));
+                balanceRepo.save(balance);
+            }
+        }
+
+        log.info("Settled {} bets for {} {} {} — total payout: {}",
+            pending.size(), gameId, drawDateKey, normalizedTime, totalPayout);
+    }
 
     private void settleIfNeeded(@NonNull Long userId) {
         List<Bet> pending = betRepo.findByUserIdAndStatusOrderByPlacedAtDesc(userId, "pending");
@@ -115,7 +172,7 @@ public class BetService {
             List<Integer> official = getOfficialNumbers(game, bet.getDrawDateKey(), resolvedDrawTime);
             List<Integer> picked = stringToNumbers(bet.getNumbers());
             int matches = countMatches(picked, official);
-            BigDecimal payout = computePayout(matches, bet.getStake());
+            BigDecimal payout = computePayoutForGame(bet.getGameId(), matches, bet.getStake());
 
             bet.setDrawTime(resolvedDrawTime);
             bet.setStatus(payout.compareTo(BigDecimal.ZERO) > 0 ? "won" : "lost");
@@ -219,7 +276,20 @@ public class BetService {
         return (int) picked.stream().filter(officialSet::contains).count();
     }
 
-    private BigDecimal computePayout(int matches, BigDecimal stake) {
+    /** Game-aware payout: 2D/3D/4D use exact-match rules, 6-number games use match-count rules. */
+    private BigDecimal computePayoutForGame(String gameId, int matches, BigDecimal stake) {
+        String id = gameId.toLowerCase();
+        if (id.contains("2d") || id.contains("ez2")) {
+            // 2D: both digits must match exactly → 2 matches = win
+            return matches == 2 ? stake.multiply(new BigDecimal("4000")) : BigDecimal.ZERO;
+        }
+        if (id.contains("3d") || id.contains("swertres")) {
+            return matches == 3 ? stake.multiply(new BigDecimal("450")) : BigDecimal.ZERO;
+        }
+        if (id.contains("4d") || id.contains("4digit")) {
+            return matches == 4 ? stake.multiply(new BigDecimal("10000")) : BigDecimal.ZERO;
+        }
+        // 6-number lotto games
         switch (matches) {
             case 6: return stake.multiply(new BigDecimal("50000"));
             case 5: return stake.multiply(new BigDecimal("5000"));
