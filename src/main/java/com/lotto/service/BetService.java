@@ -22,6 +22,7 @@ import java.util.*;
 public class BetService {
 
     private static final DateTimeFormatter DRAW_TIME_FORMATTER = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH);
+    private static final DateTimeFormatter PLACED_AT_FORMATTER = DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a", Locale.ENGLISH);
     private static final LocalTime DEFAULT_DRAW_TIME = LocalTime.of(21, 0);
 
     private final BetRepository betRepo;
@@ -102,19 +103,21 @@ public class BetService {
         boolean anySettled = false;
 
         for (Bet bet : pending) {
-            LocalDate drawDate = LocalDate.parse(bet.getDrawDateKey());
-            LocalTime drawClock = parseSingleDrawTime(bet.getDrawTime());
-            LocalDateTime drawAt = LocalDateTime.of(drawDate, drawClock);
-            if (now.isBefore(drawAt)) continue;
-
             LottoGame game = gameRepo.findById(bet.getGameId()).orElse(null);
             if (game == null) continue;
+
+            LocalDate drawDate = LocalDate.parse(bet.getDrawDateKey());
+            String resolvedDrawTime = resolveDrawTimeLabel(bet, game);
+            LocalTime drawClock = parseSingleDrawTime(resolvedDrawTime);
+            LocalDateTime drawAt = LocalDateTime.of(drawDate, drawClock);
+            if (now.isBefore(drawAt)) continue;
 
             List<Integer> official = getOfficialNumbers(game, bet.getDrawDateKey());
             List<Integer> picked = stringToNumbers(bet.getNumbers());
             int matches = countMatches(picked, official);
             BigDecimal payout = computePayout(matches, bet.getStake());
 
+            bet.setDrawTime(resolvedDrawTime);
             bet.setStatus(payout.compareTo(BigDecimal.ZERO) > 0 ? "won" : "lost");
             bet.setMatches(matches);
             bet.setPayout(payout);
@@ -301,6 +304,36 @@ public class BetService {
         return time.format(DRAW_TIME_FORMATTER).toUpperCase(Locale.ENGLISH);
     }
 
+    private String resolveDrawTimeLabel(Bet bet, LottoGame game) {
+        if (bet.getDrawTime() != null && !bet.getDrawTime().isBlank()) {
+            return formatDrawTime(parseSingleDrawTime(bet.getDrawTime()));
+        }
+
+        List<LocalTime> drawTimes = parseDrawTimes(game != null ? game.getDrawTime() : null);
+        LocalDate drawDate;
+        try {
+            drawDate = LocalDate.parse(bet.getDrawDateKey());
+        } catch (RuntimeException ignored) {
+            return formatDrawTime(drawTimes.get(drawTimes.size() - 1));
+        }
+
+        if (bet.getPlacedAt() != null && !bet.getPlacedAt().isBlank()) {
+            try {
+                LocalDateTime placedAt = LocalDateTime.parse(bet.getPlacedAt(), PLACED_AT_FORMATTER);
+                for (LocalTime time : drawTimes) {
+                    LocalDateTime drawAt = LocalDateTime.of(drawDate, time);
+                    if (drawAt.isAfter(placedAt)) {
+                        return formatDrawTime(time);
+                    }
+                }
+            } catch (RuntimeException ignored) {
+                // Fall through to latest draw slot for the date.
+            }
+        }
+
+        return formatDrawTime(drawTimes.get(drawTimes.size() - 1));
+    }
+
     private String numbersToString(List<Integer> nums) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < nums.size(); i++) {
@@ -335,7 +368,7 @@ public class BetService {
         m.put("numbers", stringToNumbers(bet.getNumbers()));
         m.put("stake", bet.getStake());
         m.put("drawDateKey", bet.getDrawDateKey());
-        m.put("drawTime", bet.getDrawTime());
+        m.put("drawTime", resolveDrawTimeLabel(bet, game));
         m.put("placedAt", bet.getPlacedAt());
         m.put("status", bet.getStatus());
         m.put("matches", bet.getMatches());

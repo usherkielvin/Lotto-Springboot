@@ -13,9 +13,6 @@ CREATE TABLE IF NOT EXISTS balances (
     CONSTRAINT fk_balance_user FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-DROP TABLE IF EXISTS bets;
-DROP TABLE IF EXISTS lotto_games;
-
 CREATE TABLE IF NOT EXISTS lotto_games (
     id VARCHAR(50) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
@@ -51,6 +48,9 @@ CREATE TABLE IF NOT EXISTS official_results (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY unique_game_draw (game_id, draw_date_key)
 );
+
+-- Add draw_time column to bets if it doesn't exist yet (safe migration)
+ALTER TABLE bets ADD COLUMN IF NOT EXISTS draw_time VARCHAR(20) NOT NULL DEFAULT '9:00 PM';
 
 INSERT IGNORE INTO users (username, password_hash, display_name, role) VALUES
     ('demo-player', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Demo Account', 'user');
