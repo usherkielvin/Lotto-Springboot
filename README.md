@@ -14,12 +14,21 @@ The backend is designed for a demo-ready lottery simulation workflow:
 - Draw result generation with deterministic fallback logic
 - Wallet operations (deposit, withdraw) and funding history
 - Player profile stats and lucky-number insights
-- Admin tools for official result management
+- Admin tools for official result management and real-time PCSO data syncing
+
+## Real-Time Data Sync
+
+The backend now includes a **PCSO Scraper Service** that fetches official lotto results directly from the Philippine Charity Sweepstakes Office (PCSO).
+
+- **Scraper Engine**: Built with [Jsoup](https://jsoup.org/) for robust HTML parsing.
+- **Game Mapping**: Automatically maps official PCSO game names (e.g., "Ultra Lotto 6/58") to internal system IDs.
+- **Automated Settlement**: Once real results are synced, the `BetService` automatically settles all pending user bets against the official winning numbers.
 
 ## Stack
 
 - Java 21
 - Spring Boot 3.4.1
+- Jsoup 1.17.2 (for real-time result scraping)
 - Spring Web
 - Spring Data JPA
 - MySQL
@@ -31,14 +40,14 @@ The backend is designed for a demo-ready lottery simulation workflow:
 Layered structure:
 
 - Controllers: HTTP API routing
-- Services: business rules and settlement logic
+- Services: business rules, settlement logic, and PCSO scraping
 - Repositories: JPA persistence access
 - Entities: domain models and schema mapping
 
 Core packages:
 
 - src/main/java/com/lotto/controller
-- src/main/java/com/lotto/service
+- src/main/java/com/lotto/service (includes `PcsoScraperService`)
 - src/main/java/com/lotto/repository
 - src/main/java/com/lotto/entity
 - src/main/java/com/lotto/config
@@ -50,7 +59,7 @@ Primary entities:
 - User
 - Balance
 - Bet
-- LottoGame
+- LottoGame (includes real-time jackpot tracking)
 - OfficialResult
 - FundingTransaction
 
@@ -98,6 +107,7 @@ Admin:
 
 - GET /api/admin/results
 - POST /api/admin/results
+- POST /api/admin/sync-pcso (triggers real-time result scraping)
 - DELETE /api/admin/results/{id}
 
 ## Business Rules

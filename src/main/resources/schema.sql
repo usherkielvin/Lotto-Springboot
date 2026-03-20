@@ -49,9 +49,6 @@ CREATE TABLE IF NOT EXISTS official_results (
     UNIQUE KEY unique_game_draw (game_id, draw_date_key)
 );
 
--- Add draw_time column to bets if it doesn't exist yet (safe migration)
-ALTER TABLE bets ADD COLUMN IF NOT EXISTS draw_time VARCHAR(20) NOT NULL DEFAULT '9:00 PM';
-
 INSERT IGNORE INTO users (username, password_hash, display_name, role) VALUES
     ('demo-player', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Demo Account', 'user');
 
@@ -84,11 +81,10 @@ INSERT INTO lotto_games (id, name, max_number, draw_time, draw_days, jackpot, ja
     ('4digit',      '4-Digit Lotto',     9999,  '9:00 PM',                    '1,3,5',              65244, 'Accumulating'),
     ('3d-swertres', '3D Lotto (Swertres)', 999, '2:00 PM, 5:00 PM, 9:00 PM', '1,2,3,4,5,6,7',      4500, 'P4,500 per P10 play'),
     ('2d-ez2',      '2D Lotto (EZ2)',       45, '2:00 PM, 5:00 PM, 9:00 PM', '1,2,3,4,5,6,7',      4000, 'P4,000 per P10 play')
-AS new_vals
 ON DUPLICATE KEY UPDATE
-    name           = new_vals.name,
-    max_number     = new_vals.max_number,
-    draw_time      = new_vals.draw_time,
-    draw_days      = new_vals.draw_days,
-    jackpot        = new_vals.jackpot,
-    jackpot_status = new_vals.jackpot_status;
+    name           = VALUES(name),
+    max_number     = VALUES(max_number),
+    draw_time      = VALUES(draw_time),
+    draw_days      = VALUES(draw_days),
+    jackpot        = VALUES(jackpot),
+    jackpot_status = VALUES(jackpot_status);

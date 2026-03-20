@@ -3,6 +3,7 @@ package com.lotto.controller;
 import com.lotto.entity.OfficialResult;
 import com.lotto.repository.OfficialResultRepository;
 import com.lotto.repository.UserRepository;
+import com.lotto.service.PcsoScraperService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.lang.NonNull;
 import org.springframework.web.bind.annotation.*;
@@ -14,16 +15,26 @@ public class AdminController {
 
     private final OfficialResultRepository resultRepo;
     private final UserRepository userRepo;
+    private final PcsoScraperService scraperService;
 
-    public AdminController(OfficialResultRepository resultRepo, UserRepository userRepo) {
+    public AdminController(OfficialResultRepository resultRepo, UserRepository userRepo, PcsoScraperService scraperService) {
         this.resultRepo = resultRepo;
         this.userRepo = userRepo;
+        this.scraperService = scraperService;
     }
 
     private boolean isAdmin(@NonNull Long userId) {
         return userRepo.findById(userId)
                 .map(u -> "admin".equals(u.getRole()))
                 .orElse(false);
+    }
+
+    @PostMapping("/sync-pcso")
+    public ResponseEntity<?> syncWithPcso(@RequestHeader("X-User-Id") @NonNull Long userId) {
+        if (!isAdmin(userId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Admin access required."));
+        }
+        return ResponseEntity.ok(scraperService.updateResultsFromPcso());
     }
 
     @PostMapping("/results")
