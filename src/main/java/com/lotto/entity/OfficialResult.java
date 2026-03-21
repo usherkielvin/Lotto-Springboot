@@ -23,6 +23,10 @@ public class OfficialResult {
     @Column(nullable = false)
     private String numbers;
 
+    /** Jackpot prize for this specific draw (nullable — digit games don't have one) */
+    @Column(name = "jackpot")
+    private Long jackpot;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -38,6 +42,8 @@ public class OfficialResult {
     public void setDrawTime(String drawTime) { this.drawTime = drawTime; }
     public String getNumbers() { return numbers; }
     public void setNumbers(String numbers) { this.numbers = numbers; }
+    public Long getJackpot() { return jackpot; }
+    public void setJackpot(Long jackpot) { this.jackpot = jackpot; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

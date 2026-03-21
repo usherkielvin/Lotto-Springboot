@@ -48,6 +48,13 @@ public class AuthController {
         }
     }
 
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout() {
+        // Stateless JWT — nothing to invalidate server-side.
+        // Client clears its own session; this endpoint exists so the app doesn't 404.
+        return ResponseEntity.ok(Map.of("message", "Logged out."));
+    }
+
     @GetMapping("/hash")
     public ResponseEntity<?> generateHash(@RequestParam String password) {
         BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();

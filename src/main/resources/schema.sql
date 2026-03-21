@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS official_results (
     draw_date_key VARCHAR(20) NOT NULL,
     draw_time VARCHAR(20) NOT NULL DEFAULT '9:00 PM',
     numbers VARCHAR(100) NOT NULL,
+    jackpot BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY unique_game_draw (game_id, draw_date_key, draw_time)
 );
@@ -62,12 +63,12 @@ CREATE TABLE IF NOT EXISTS funding_transactions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- ─── Fresh start: wipe all transactional data on every startup ────────────────
--- Order matters: bets and funding reference users; results are standalone.
+-- ─── Fresh start: wipe transactional data on every startup ───────────────────
+-- official_results is intentionally excluded so admin-imported results persist.
+-- Order matters: bets and funding reference users.
 
 SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE bets;
-TRUNCATE TABLE official_results;
 TRUNCATE TABLE funding_transactions;
 TRUNCATE TABLE balances;
 TRUNCATE TABLE users;
