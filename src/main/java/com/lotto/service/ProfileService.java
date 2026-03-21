@@ -6,6 +6,7 @@ import com.lotto.entity.User;
 import com.lotto.repository.BalanceRepository;
 import com.lotto.repository.BetRepository;
 import com.lotto.repository.UserRepository;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.lang.NonNull;
 
@@ -23,6 +24,53 @@ public class ProfileService {
         this.betRepo = betRepo;
         this.balanceRepo = balanceRepo;
         this.userRepo = userRepo;
+    }
+
+    public Map<String, Object> updateProfile(@NonNull Long userId, Map<String, String> body) {
+        User user = userRepo.findById(userId).orElseThrow(() -> new RuntimeException("User not found."));
+
+        String displayName = body.get("displayName");
+        if (displayName != null) {
+            String trimmed = displayName.trim();
+            if (trimmed.isEmpty()) throw new RuntimeException("Display name cannot be empty.");
+            if (trimmed.length() > 32) throw new RuntimeException("Display name must be 32 characters or fewer.");
+            user.setDisplayName(trimmed);
+        }
+
+        String newUsername = body.get("username");
+        if (newUsername != null) {
+            String clean = newUsername.trim().toLowerCase();
+            if (clean.isEmpty()) throw new RuntimeException("Username cannot be empty.");
+            if (clean.length() < 3) throw new RuntimeException("Username must be at least 3 characters.");
+            if (clean.length() > 24) throw new RuntimeException("Username must be 24 characters or fewer.");
+            if (!clean.matches("[a-z0-9._-]+")) throw new RuntimeException("Username can only contain letters, numbers, dots, hyphens and underscores.");
+            if (!clean.equals(user.getUsername()) && userRepo.findByUsername(clean).isPresent()) {
+                throw new RuntimeException("Username already taken.");
+            }
+            user.setUsername(clean);
+        }
+
+        userRepo.save(user);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("userId", user.getId());
+        result.put("username", user.getUsername());
+        result.put("displayName", user.getDisplayName() != null ? user.getDisplayName() : user.getUsername());
+        return result;
+    }
+
+    public void changePassword(@NonNull Long userId, String currentPassword, String newPassword) {
+        User user = userRepo.findById(userId).orElseThrow(() -> new RuntimeException("User not found."));
+
+        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+        if (!encoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new RuntimeException("Current password is incorrect.");
+        }
+        if (newPassword == null || newPassword.length() < 6) {
+            throw new RuntimeException("New password must be at least 6 characters.");
+        }
+        user.setPasswordHash(encoder.encode(newPassword));
+        userRepo.save(user);
     }
 
     public Map<String, Object> getProfile(@NonNull Long userId) {

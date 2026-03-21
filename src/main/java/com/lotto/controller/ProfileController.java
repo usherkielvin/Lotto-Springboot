@@ -25,4 +25,27 @@ public class ProfileController {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
+
+    @PutMapping
+    public ResponseEntity<?> updateProfile(
+            @RequestHeader("X-User-Id") @NonNull Long userId,
+            @RequestBody Map<String, String> body) {
+        try {
+            return ResponseEntity.ok(profileService.updateProfile(userId, body));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PutMapping("/password")
+    public ResponseEntity<?> changePassword(
+            @RequestHeader("X-User-Id") @NonNull Long userId,
+            @RequestBody Map<String, String> body) {
+        try {
+            profileService.changePassword(userId, body.get("currentPassword"), body.get("newPassword"));
+            return ResponseEntity.ok(Map.of("message", "Password updated."));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
 }
